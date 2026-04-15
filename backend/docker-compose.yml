@@ -1,0 +1,111 @@
+services:
+
+  # ── Infrastructure ────────────────────────────────────────────────
+
+  postgres_account:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: account_db
+      POSTGRES_USER: rpg
+      POSTGRES_PASSWORD: rpgpassword
+    volumes:
+      - pg_account_data:/var/lib/postgresql/data
+    networks: [rpg_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rpg -d account_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres_character:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: character_db
+      POSTGRES_USER: rpg
+      POSTGRES_PASSWORD: rpgpassword
+    volumes:
+      - pg_character_data:/var/lib/postgresql/data
+    networks: [rpg_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rpg -d character_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres_combat:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: combat_db
+      POSTGRES_USER: rpg
+      POSTGRES_PASSWORD: rpgpassword
+    volumes:
+      - pg_combat_data:/var/lib/postgresql/data
+    networks: [rpg_net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rpg -d combat_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    networks: [rpg_net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Application Services ─────────────────────────────────────────
+
+  account_service:
+    build: ./account_service
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://rpg:rpgpassword@postgres_account:5432/account_db
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-24}
+    depends_on:
+      postgres_account:
+        condition: service_healthy
+    networks: [rpg_net]
+
+  character_service:
+    build: ./character_service
+    ports:
+      - "8002:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://rpg:rpgpassword@postgres_character:5432/character_db
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      postgres_character:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [rpg_net]
+
+  combat_service:
+    build: ./combat_service
+    ports:
+      - "8003:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://rpg:rpgpassword@postgres_combat:5432/combat_db
+      JWT_SECRET: ${JWT_SECRET}
+      CHARACTER_SERVICE_URL: http://character_service:8000
+    depends_on:
+      postgres_combat:
+        condition: service_healthy
+      character_service:
+        condition: service_started
+    networks: [rpg_net]
+
+networks:
+  rpg_net:
+    driver: bridge
+
+volumes:
+  pg_account_data:
+  pg_character_data:
+  pg_combat_data:
